@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ESP32-S3 Cloud Node</title>
+    <title>ESP32-S3 Smart Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <style>
         * {
@@ -16,7 +16,7 @@
             background-color: #000000;
             color: #ffffff;
             min-height: 100vh;
-            padding: 40px 24px 28px 24px;
+            padding: 32px 20px 24px 20px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -29,7 +29,7 @@
         .title {
             font-size: 0.8rem;
             letter-spacing: 2px;
-            color: #55555c;
+            color: #71717a;
             font-weight: 600;
         }
         .status-container {
@@ -52,17 +52,17 @@
         .content {
             display: flex;
             flex-direction: column;
-            gap: 16px;
-            margin: auto 0;
+            gap: 14px;
+            margin: 20px 0;
         }
         .card {
             background: #09090b;
             border: 1px solid #18181b;
-            border-radius: 20px;
-            padding: 24px 28px;
+            border-radius: 18px;
+            padding: 20px 24px;
         }
         .card-label {
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             letter-spacing: 2px;
             color: #71717a;
             font-weight: 600;
@@ -74,22 +74,63 @@
             justify-content: space-between;
         }
         .num {
-            font-size: 4.2rem;
+            font-size: 3.8rem;
             font-weight: 300;
             letter-spacing: -2px;
             line-height: 1;
         }
         .unit {
-            font-size: 1.4rem;
+            font-size: 1.3rem;
             font-weight: 400;
         }
         .temp-unit { color: #ea580c; }
         .hum-unit { color: #38bdf8; }
+        
+        /* สไตล์สำหรับส่วนควบคุมไฟ */
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 10px;
+        }
+        .btn {
+            background: #18181b;
+            color: #ffffff;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 14px 0;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+        .btn-on.active {
+            background: #22c55e;
+            color: #000000;
+            border-color: #22c55e;
+            box-shadow: 0 0 14px rgba(34, 197, 94, 0.4);
+        }
+        .btn-off.active {
+            background: #ef4444;
+            color: #ffffff;
+            border-color: #ef4444;
+            box-shadow: 0 0 14px rgba(239, 68, 68, 0.4);
+        }
+        .light-state-text {
+            font-size: 0.85rem;
+            color: #a1a1aa;
+            margin-top: 4px;
+        }
+
         .footer {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             color: #52525b;
         }
         .mode-val {
@@ -101,7 +142,7 @@
 <body>
 
     <div class="header">
-        <span class="title">ESP32-S3 CLOUD</span>
+        <span class="title">ESP32-S3 IOT</span>
         <div class="status-container">
             <span id="status-text">Connecting...</span>
             <div class="status-dot" id="status-dot"></div>
@@ -109,6 +150,7 @@
     </div>
 
     <div class="content">
+        <!-- การ์ดอุณหภูมิ -->
         <div class="card">
             <div class="card-label">TEMPERATURE</div>
             <div class="val-group">
@@ -117,6 +159,7 @@
             </div>
         </div>
 
+        <!-- การ์ดความชื้น -->
         <div class="card">
             <div class="card-label">HUMIDITY</div>
             <div class="val-group">
@@ -124,24 +167,36 @@
                 <span class="unit hum-unit">%</span>
             </div>
         </div>
+
+        <!-- การ์ดควบคุมไฟห้อง (SERVO) -->
+        <div class="card">
+            <div class="card-label">ROOM LIGHT (PIN 10)</div>
+            <div class="light-state-text" id="light-status">สถานะ: รอคำสั่ง...</div>
+            <div class="btn-group">
+                <button class="btn btn-on" id="btn-on" onclick="sendLightCommand('ON')">💡 เปิดไฟ</button>
+                <button class="btn btn-off" id="btn-off" onclick="sendLightCommand('OFF')">🌑 ปิดไฟ</button>
+            </div>
+        </div>
     </div>
 
     <div class="footer">
-        <span>MODE</span>
-        <span class="mode-val">5G / Cloud MQTT</span>
+        <span>NETWORK</span>
+        <span class="mode-val">Cloud MQTT / 5G</span>
     </div>
 
     <script>
-        // ตั้งค่าให้ตรงกับ ESP32 เป๊ะๆ 100%
-        const MQTT_BROKER = "broker.emqx.io";
-        const MQTT_PORT   = 8084; // พอร์ต Secure WSS
-        const MQTT_PATH   = "/mqtt";
-        const MQTT_TOPIC  = "thnwathn/esp32/weather";
-        const CLIENT_ID   = "WebClient_" + Math.random().toString(16).substr(2, 8);
+        const MQTT_BROKER    = "broker.emqx.io";
+        const MQTT_PORT      = 8084; // พอร์ต Secure WSS
+        const MQTT_PATH      = "/mqtt";
+        const TOPIC_WEATHER  = "thnwathn/esp32/weather";
+        const TOPIC_LIGHT    = "thnwathn/esp32/light";
+        const CLIENT_ID      = "WebClient_" + Math.random().toString(16).substr(2, 8);
 
+        let isMqttConnected = false;
         const client = new Paho.MQTT.Client(MQTT_BROKER, Number(MQTT_PORT), MQTT_PATH, CLIENT_ID);
 
         client.onConnectionLost = function(response) {
+            isMqttConnected = false;
             document.getElementById("status-text").innerText = "Offline";
             document.getElementById("status-dot").className = "status-dot";
             setTimeout(initMQTT, 3000);
@@ -149,12 +204,14 @@
 
         client.onMessageArrived = function(message) {
             try {
-                const data = JSON.parse(message.payloadString);
-                if (data.temp !== undefined) {
-                    document.getElementById("temp-val").innerText = Number(data.temp).toFixed(1);
-                }
-                if (data.hum !== undefined) {
-                    document.getElementById("hum-val").innerText = Number(data.hum).toFixed(1);
+                if (message.destinationName === TOPIC_WEATHER) {
+                    const data = JSON.parse(message.payloadString);
+                    if (data.temp !== undefined) {
+                        document.getElementById("temp-val").innerText = Number(data.temp).toFixed(1);
+                    }
+                    if (data.hum !== undefined) {
+                        document.getElementById("hum-val").innerText = Number(data.hum).toFixed(1);
+                    }
                 }
             } catch (e) {
                 console.error("Payload error:", e);
@@ -166,16 +223,46 @@
                 useSSL: true,
                 timeout: 5,
                 onSuccess: function() {
+                    isMqttConnected = true;
                     document.getElementById("status-text").innerText = "Connected";
                     document.getElementById("status-dot").className = "status-dot online";
-                    client.subscribe(MQTT_TOPIC);
+                    client.subscribe(TOPIC_WEATHER);
                 },
                 onFailure: function(err) {
+                    isMqttConnected = false;
                     document.getElementById("status-text").innerText = "Failed";
                     document.getElementById("status-dot").className = "status-dot";
                     setTimeout(initMQTT, 3000);
                 }
             });
+        }
+
+        // ฟังก์ชันส่งคำสั่งเปิด/ปิดไฟไปยัง ESP32
+        function sendLightCommand(action) {
+            if (!isMqttConnected) {
+                alert("ยังไม่ได้เชื่อมต่อกับ Cloud กรุณารอสักครู่");
+                return;
+            }
+
+            const message = new Paho.MQTT.Message(action);
+            message.destinationName = TOPIC_LIGHT;
+            message.qos = 0;
+            client.send(message);
+
+            // อัปเดตสีปุ่มและข้อความบนหน้าจอ
+            const btnOn = document.getElementById("btn-on");
+            const btnOff = document.getElementById("btn-off");
+            const statusText = document.getElementById("light-status");
+
+            if (action === "ON") {
+                btnOn.classList.add("active");
+                btnOff.classList.remove("active");
+                statusText.innerText = "สถานะ: สั่งเปิดไฟแล้ว (90°)";
+            } else {
+                btnOff.classList.add("active");
+                btnOn.classList.remove("active");
+                statusText.innerText = "สถานะ: สั่งปิดไฟแล้ว (0°)";
+            }
         }
 
         initMQTT();
