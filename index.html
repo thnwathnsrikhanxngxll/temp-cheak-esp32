@@ -1,134 +1,184 @@
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include "DHT.h"
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ESP32-S3 Cloud Node</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 40px 24px 28px 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .title {
+            font-size: 0.8rem;
+            letter-spacing: 2px;
+            color: #55555c;
+            font-weight: 600;
+        }
+        .status-container {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: #71717a;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #ef4444;
+        }
+        .status-dot.online {
+            background-color: #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+        }
+        .content {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin: auto 0;
+        }
+        .card {
+            background: #09090b;
+            border: 1px solid #18181b;
+            border-radius: 20px;
+            padding: 24px 28px;
+        }
+        .card-label {
+            font-size: 0.75rem;
+            letter-spacing: 2px;
+            color: #71717a;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .val-group {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+        }
+        .num {
+            font-size: 4.2rem;
+            font-weight: 300;
+            letter-spacing: -2px;
+            line-height: 1;
+        }
+        .unit {
+            font-size: 1.4rem;
+            font-weight: 400;
+        }
+        .temp-unit { color: #ea580c; }
+        .hum-unit { color: #38bdf8; }
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: #52525b;
+        }
+        .mode-val {
+            color: #3b82f6;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
 
-// WiFi Config
-const char* ssid     = "XiaomiIoT";
-const char* password = "ThnwathnIoT";
+    <div class="header">
+        <span class="title">ESP32-S3 CLOUD</span>
+        <div class="status-container">
+            <span id="status-text">Connecting...</span>
+            <div class="status-dot" id="status-dot"></div>
+        </div>
+    </div>
 
-// MQTT Config
-const char* mqtt_server = "broker.emqx.io";
-const int   mqtt_port   = 1883;
-const char* mqtt_topic  = "thnwathn/esp32/weather";
+    <div class="content">
+        <div class="card">
+            <div class="card-label">TEMPERATURE</div>
+            <div class="val-group">
+                <span id="temp-val" class="num">--.-</span>
+                <span class="unit temp-unit">°C</span>
+            </div>
+        </div>
 
-// กำหนดพินเดิมทั้งหมด
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define I2C_SDA 5
-#define I2C_SCL 4
-#define DHT_PIN 15
-#define DHT_TYPE DHT22
-#define RGB_PIN 48
+        <div class="card">
+            <div class="card-label">HUMIDITY</div>
+            <div class="val-group">
+                <span id="hum-val" class="num">--.-</span>
+                <span class="unit hum-unit">%</span>
+            </div>
+        </div>
+    </div>
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-DHT dht(DHT_PIN, DHT_TYPE);
-WiFiClient espClient;
-PubSubClient client(espClient);
+    <div class="footer">
+        <span>MODE</span>
+        <span class="mode-val">5G / Cloud MQTT</span>
+    </div>
 
-unsigned long lastSendTime = 0;
-unsigned long lastMqttRetry = 0;
+    <script>
+        // ตั้งค่าให้ตรงกับ ESP32 เป๊ะๆ 100%
+        const MQTT_BROKER = "broker.emqx.io";
+        const MQTT_PORT   = 8084; // พอร์ต Secure WSS
+        const MQTT_PATH   = "/mqtt";
+        const MQTT_TOPIC  = "thnwathn/esp32/weather";
+        const CLIENT_ID   = "WebClient_" + Math.random().toString(16).substr(2, 8);
 
-void setup() {
-  Serial.begin(9600);
-  delay(500);
+        const client = new Paho.MQTT.Client(MQTT_BROKER, Number(MQTT_PORT), MQTT_PATH, CLIENT_ID);
 
-  // เริ่มต้น I2C และเซ็นเซอร์ที่พินเดิม
-  Wire.begin(I2C_SDA, I2C_SCL);
-  dht.begin();
-  
-  if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    display.clearDisplay();
-    display.setTextColor(WHITE);
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println("Connecting WiFi...");
-    display.display();
-  }
+        client.onConnectionLost = function(response) {
+            document.getElementById("status-text").innerText = "Offline";
+            document.getElementById("status-dot").className = "status-dot";
+            setTimeout(initMQTT, 3000);
+        };
 
-  // เชื่อมต่อ WiFi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+        client.onMessageArrived = function(message) {
+            try {
+                const data = JSON.parse(message.payloadString);
+                if (data.temp !== undefined) {
+                    document.getElementById("temp-val").innerText = Number(data.temp).toFixed(1);
+                }
+                if (data.hum !== undefined) {
+                    document.getElementById("hum-val").innerText = Number(data.hum).toFixed(1);
+                }
+            } catch (e) {
+                console.error("Payload error:", e);
+            }
+        };
 
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
+        function initMQTT() {
+            client.connect({
+                useSSL: true,
+                timeout: 5,
+                onSuccess: function() {
+                    document.getElementById("status-text").innerText = "Connected";
+                    document.getElementById("status-dot").className = "status-dot online";
+                    client.subscribe(MQTT_TOPIC);
+                },
+                onFailure: function(err) {
+                    document.getElementById("status-text").innerText = "Failed";
+                    document.getElementById("status-dot").className = "status-dot";
+                    setTimeout(initMQTT, 3000);
+                }
+            });
+        }
 
-  client.setServer(mqtt_server, mqtt_port);
-}
-
-void reconnect() {
-  if (!client.connected()) {
-    unsigned long now = millis();
-    if (now - lastMqttRetry > 5000) {
-      lastMqttRetry = now;
-      String clientId = "ESP32S3-" + String(random(0xffff), HEX);
-      Serial.print("Connecting to MQTT...");
-      if (client.connect(clientId.c_str())) {
-        Serial.println(" Connected!");
-        neopixelWrite(RGB_PIN, 0, 30, 0); // สีเขียว = ส่งข้อมูลปกติ
-      } else {
-        Serial.println(" Failed, will retry");
-        neopixelWrite(RGB_PIN, 30, 20, 0); // สีส้ม = กำลังต่อใหม่
-      }
-    }
-  }
-}
-
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.begin(ssid, password);
-    delay(1000);
-    return;
-  }
-
-  if (!client.connected()) {
-    reconnect();
-  } else {
-    client.loop();
-  }
-
-  unsigned long currentMillis = millis();
-  if (currentMillis - lastSendTime >= 2000) {
-    lastSendTime = currentMillis;
-
-    float hum = dht.readHumidity();
-    float temp = dht.readTemperature();
-
-    if (!isnan(hum) && !isnan(temp)) {
-      // แสดงผลบนจอ OLED
-      display.clearDisplay();
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.print("Status: ");
-      display.println(client.connected() ? "Cloud Online" : "Connecting");
-
-      display.setTextSize(2);
-      display.setCursor(0, 18);
-      display.print("T: ");
-      display.print(temp, 1);
-      display.println(" C");
-
-      display.setCursor(0, 42);
-      display.print("H: ");
-      display.print(hum, 1);
-      display.println(" %");
-      display.display();
-
-      // ส่งขึ้นหน้าเว็บผ่าน MQTT
-      if (client.connected()) {
-        String payload = "{\"temp\":" + String(temp, 1) + ",\"hum\":" + String(hum, 1) + "}";
-        client.publish(mqtt_topic, payload.c_str());
-        Serial.print("Published: ");
-        Serial.println(payload);
-      }
-    } else {
-      Serial.println("Failed to read DHT sensor! Check pin 15");
-    }
-  }
-}
+        initMQTT();
+    </script>
+</body>
+</html>
